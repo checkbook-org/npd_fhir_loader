@@ -158,6 +158,7 @@ Expect several hours in total; on a workstation it took about 4 h. The run is do
 ## 6. Verify
 
 ```bash
+T="sudo -u cbadmin /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml"
 $T status        # one release, its download/extract/import run ids, published = yes
 ```
 
@@ -191,15 +192,20 @@ SQL
 Expect one release, with about 7.5M practitioners, 11.2M practitioner roles, 2.1M organizations and 2.6M
 locations for a late-2026 release.
 
-**Strongest check:** if production has already loaded the **same release**, the two IMPORT runs must report
-identical row counts for every table. Run this on both `css_catalog_test` and `css_catalog_local`, and compare
-the output:
+**Strongest check:** if production has already loaded the **same release**, every published table must have
+the same number of rows in `npd_test` and `npd`. `compare` counts them in both databases and prints one line
+per table:
 
-```sql
-SELECT xml_output FROM master_warehouse_run
- WHERE run_class = 'IMPORT' AND completion_status = 'Success'
- ORDER BY id DESC LIMIT 1;
+```bash
+$T compare /etc/npd-loader/config.toml                       # the newest release published in both
+$T compare /etc/npd-loader/config.toml --release YYYY-MM-DD  # or a given release
 ```
+
+It exits 0 and ends with `N of N tables match` when every count is equal. A table marked `NO` has a different
+count, or exists for that release in only one database (`-`), and the exit code is 1. `compare` only reads, but
+it counts every row of the release (about 75 GB), so it takes several minutes; run it when neither loader is
+running. It reads each database with the `[npd_db]` user of its own config, so the cbadmin in `$T` must be able
+to read both config files.
 
 Finally, run again. Both stages must be skipped:
 
@@ -215,7 +221,7 @@ Once you no longer need it:
 
 ```bash
 psql -h 192.10.0.6 -U <pg_admin> -d postgres -c 'DROP DATABASE npd_test' -c 'DROP DATABASE css_catalog_test'
-sudo rm -rf /data/npd_test /home/cbadmin/national_provider_dir/npd-loader-test /etc/npd-loader/config-test.toml
+sudo rm -rf /home/cbadmin/national_provider_dir/npd_data/npd_test /home/cbadmin/national_provider_dir/npd-loader-test /etc/npd-loader/config-test.toml
 ```
 
 ## Upgrading production (after the test passes)

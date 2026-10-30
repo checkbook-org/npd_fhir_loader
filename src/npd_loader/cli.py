@@ -10,6 +10,7 @@ from datetime import date
 import httpx
 
 from npd_loader.catalog import Catalog, open_catalog
+from npd_loader.compare import compare_counts, format_comparison, release_counts
 from npd_loader.config import CatalogConfig, Config, ConfigError, load_config
 from npd_loader.credentials import catalog_connection, conninfo
 from npd_loader.db import advisory_lock, published_releases
@@ -38,6 +39,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("run", help="download, then import (extracting as needed)")
     sub.add_parser("status", help="show recent releases")
     sub.add_parser("init-db", help="create npd database objects")
+    p = sub.add_parser("compare", help="compare a release's row counts with another install's NPD database")
+    p.add_argument("other_config", help="config file of the other install")
+    p.add_argument("--release", type=date.fromisoformat, help="default: the newest release published in both")
     p = sub.add_parser("profile", help="list JSON paths in an .ndjson or .ndjson.zst file")
     p.add_argument("path")
     p.add_argument("--unmapped", action="store_true", help="only paths not in mapped_paths.txt; exit 1 if any")
@@ -83,6 +87,31 @@ def _profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _compare(config: Config, other: Config, release: date | None) -> int:
+    """Exit 0 if every published table of the release has the same row count in both NPD databases."""
+    if (config.npd_db.host, config.npd_db.port, config.npd_db.dbname) ==             (other.npd_db.host, other.npd_db.port, other.npd_db.dbname):
+        raise ConfigError("both configs point at the same NPD database")
+    this_db, other_db = conninfo(config, "npd_db"), conninfo(other, "npd_db")
+    if release is None:
+        common = (set(published_releases(this_db, config.npd_db.schema))
+                  & set(published_releases(other_db, other.npd_db.schema)))
+        if not common:
+            log.error("no release is published in both %s and %s", config.npd_db.dbname, other.npd_db.dbname)
+            return 1
+        release = max(common)
+    rows = compare_counts(
+        release_counts(this_db, [config.npd_db.raw_schema, config.npd_db.schema], release),
+        release_counts(other_db, [other.npd_db.raw_schema, other.npd_db.schema], release))
+    if not rows:
+        log.error("release %s is published in neither database", release)
+        return 1
+    print(f"release {release}")
+    print(format_comparison(rows, config.npd_db.dbname, other.npd_db.dbname))
+    different = [r.table for r in rows if not r.matches]
+    print(f"{len(rows) - len(different)} of {len(rows)} tables match")
+    return 1 if different else 0
+
+
 def _run(ctx: Context) -> int:
     """Download, then import even if the download failed (an earlier download may still need importing).
     Exit 1 if either stage failed."""
@@ -111,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
             init_db(conninfo(config, "npd_db"), config.npd_db.raw_schema, config.npd_db.schema)
             log.info("npd database objects are up to date")
             return 0
+        if args.command == "compare":
+            return _compare(config, load_config(args.other_config), args.release)
         ctx = build_context(config)
         try:
             if args.command == "download":

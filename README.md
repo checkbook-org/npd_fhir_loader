@@ -63,6 +63,7 @@ string needs `TrustServerCertificate=yes` unless the server has a trusted certif
 | `npd-loader import [--release YYYY-MM-DD] [--force]` | IMPORT run: load, transform, publish atomically, apply retention |
 | `npd-loader status` | recent releases, their successful runs, and whether each is published |
 | `npd-loader profile FILE [--unmapped]` | JSON paths in an `.ndjson[.zst]` file; `--unmapped` exits 1 if any path is unmapped |
+| `npd-loader compare OTHER_CONFIG [--release YYYY-MM-DD]` | manual check: exact row counts of every published table of one release (default: the newest published in both) in this config's NPD database and in OTHER_CONFIG's; exits 1 if any differ |
 
 Exit code 0 means success, nothing to do, or another run holds the lock; anything else is a failure. Logs go to stderr.
 
