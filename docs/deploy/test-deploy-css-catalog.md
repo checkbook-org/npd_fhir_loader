@@ -45,7 +45,7 @@ the Postgres role that creates databases; `<npd_user>` and `<catalog_user>` are 
 
 ```bash
 sudo mkdir -p /data/npd_test
-sudo chown npd: /data/npd_test
+sudo chown cbadmin: /data/npd_test
 
 # as cbadmin
 mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test
@@ -58,15 +58,11 @@ python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader-test/.venv
 Expect `Name: css-catalog` and `Version: 0.1.0`. If pip asks for a GitHub username or fails while cloning
 css-catalog-client, the token isn't set up for this account. Go back to `github-token-css-catalog.md`.
 
-The `npd` service account runs the loader, so it needs to reach the venv inside cbadmin's home folder. Production
-already needs this, so it is probably in place. Check:
-
-```bash
-sudo -u npd /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --help
-```
-
-If that fails with `Permission denied`, give `npd` execute-only access to the two parent folders (no right to list
-them): `sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir`.
+The loader runs as cbadmin, as production does today, so this runbook runs every loader command as cbadmin and
+gives cbadmin ownership of the test config and data folder. When production moves to a dedicated `npd` service
+account, change `cbadmin` to `npd` in the `chown`, `sudo -u` and `--uid` lines below. Also give `npd` execute-only
+access to the two folders above the install, so it can reach the venv without being able to list them:
+`sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir`.
 
 ## 2. Create the test databases (192.10.0.6)
 
@@ -96,7 +92,7 @@ Copy the production config and change exactly three values:
 
 ```bash
 sudo cp /etc/npd-loader/config.toml /etc/npd-loader/config-test.toml
-sudo chown npd: /etc/npd-loader/config-test.toml
+sudo chown cbadmin: /etc/npd-loader/config-test.toml
 sudo chmod 600 /etc/npd-loader/config-test.toml
 sudoedit /etc/npd-loader/config-test.toml
 ```
@@ -117,7 +113,7 @@ The output should show only those three lines changed.
 ## 4. Initialize and check
 
 ```bash
-T="sudo -u npd /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml"
+T="sudo -u cbadmin /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml"
 $T init-db
 $T status
 ```
@@ -129,7 +125,7 @@ $T status
 Run it as a transient systemd unit, so it survives logging out and its log goes to the journal:
 
 ```bash
-sudo systemd-run --unit=npd-loader-test --uid=npd \
+sudo systemd-run --unit=npd-loader-test --uid=cbadmin \
      /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml run
 journalctl -u npd-loader-test -f        # Ctrl-C stops following, not the run
 ```
@@ -223,7 +219,7 @@ sudo rm -rf /data/npd_test /home/cbadmin/national_provider_dir/npd-loader-test /
    /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip show css-catalog | head -2      # Version: 0.1.0
    ```
    `--force-reinstall` is needed because npd-loader's own version number did not change.
-5. `sudo -u npd /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml init-db`, then `... status`.
+5. `sudo -u cbadmin /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml init-db`, then `... status`.
    It must list the existing releases with their run ids.
 6. Optional: a manual `... run`. It downloads and imports a new release if there is one, and otherwise skips
    both stages.
