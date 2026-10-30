@@ -9,7 +9,7 @@ section *Upgrading production* covers the real rollout.
 |---|---|---|
 | Install | `/home/cbadmin/national_provider_dir/npd-loader` | `/home/cbadmin/national_provider_dir/npd-loader-test` |
 | Config | `/etc/npd-loader/config.toml` | `/etc/npd-loader/config-test.toml` |
-| Data folder | `/data/npd` | `/home/cbadmin/national_provider_dir/npd_data/npd_test` |
+| Data folder | `/home/cbadmin/national_provider_dir/npd_data` | `/home/cbadmin/national_provider_dir/npd_data_test` |
 | NPD database (192.10.0.6) | `npd` | `npd_test` |
 | Catalog database (192.10.0.6) | `css_catalog_local` | `css_catalog_test` |
 
@@ -33,7 +33,7 @@ On the servers:
 4. 192.10.0.7: cbadmin can read css-catalog-client. See `github-token-css-catalog.md`; its step 3
    must pass.
 5. 192.10.0.6: about **90 GB** free for `npd_test`. One release is about 75 GB, plus working space.
-6. 192.10.0.7: about **45 GB** free on the filesystem holding `/home/cbadmin/national_provider_dir/npd_data/npd_test`. That's 2.4 GB of `.zst` plus
+6. 192.10.0.7: about **45 GB** free on the filesystem holding `/home/cbadmin/national_provider_dir/npd_data_test`. That's 2.4 GB of `.zst` plus
    35 GB of `.ndjson` per release.
 7. You can connect to 192.10.0.6 with `psql` as a role that can create databases.
 
@@ -44,11 +44,8 @@ the Postgres role that creates databases; `<npd_user>` and `<catalog_user>` are 
 ## 1. Install the branch beside production (192.10.0.7)
 
 ```bash
-sudo mkdir -p /home/cbadmin/national_provider_dir/npd_data/npd_test
-sudo chown cbadmin: /home/cbadmin/national_provider_dir/npd_data/npd_test
-
 # as cbadmin
-mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test
+mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test /home/cbadmin/national_provider_dir/npd_data_test
 git clone -b css-catalog-client-migration https://github.com/checkbook-org/npd_fhir_loader.git /home/cbadmin/national_provider_dir/npd-loader-test/src
 python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader-test/.venv
 /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/pip install /home/cbadmin/national_provider_dir/npd-loader-test/src
@@ -60,8 +57,9 @@ css-catalog-client, the token isn't set up for this account. Go back to `github-
 
 The loader runs as cbadmin, as production does today, so this runbook runs every loader command as cbadmin and
 gives cbadmin ownership of the test config and data folder. When production moves to a dedicated `npd` service
-account, change `cbadmin` to `npd` in the `chown`, `sudo -u` and `--uid` lines below. Also give `npd` execute-only
-access to the two folders above the install, so it can reach the venv without being able to list them:
+account, change `cbadmin` to `npd` in the `chown` and `sudo -u` lines below, and give `npd` the data folder with
+`sudo chown -R npd: /home/cbadmin/national_provider_dir/npd_data_test`. Also give `npd` execute-only access to the
+two folders above the install, so it can reach the venv and the data folder without being able to list them:
 `sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir`.
 
 ## 2. Create the test databases (192.10.0.6)
@@ -97,7 +95,7 @@ sudo chmod 600 /etc/npd-loader/config-test.toml
 sudoedit /etc/npd-loader/config-test.toml
 ```
 
-- `[storage] root = "/home/cbadmin/national_provider_dir/npd_data/npd_test"`
+- `[storage] root = "/home/cbadmin/national_provider_dir/npd_data_test"`
 - `[npd_db] dbname = "npd_test"`
 - `[catalog] dbname = "css_catalog_test"`
 
@@ -221,7 +219,8 @@ Once you no longer need it:
 
 ```bash
 psql -h 192.10.0.6 -U <pg_admin> -d postgres -c 'DROP DATABASE npd_test' -c 'DROP DATABASE css_catalog_test'
-sudo rm -rf /home/cbadmin/national_provider_dir/npd_data/npd_test /home/cbadmin/national_provider_dir/npd-loader-test /etc/npd-loader/config-test.toml
+rm -rf /home/cbadmin/national_provider_dir/npd_data_test /home/cbadmin/national_provider_dir/npd-loader-test        # as cbadmin
+sudo rm /etc/npd-loader/config-test.toml
 ```
 
 ## Upgrading production (after the test passes)

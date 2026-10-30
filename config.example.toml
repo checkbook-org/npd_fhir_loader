@@ -5,7 +5,7 @@ manifest_url = "https://directory.cms.gov/downloads/manifest.json"
 
 [storage]
 backend = "local"
-root = "/data/npd"            # npd_data_folder
+root = "/home/cbadmin/national_provider_dir/npd_data"   # npd_data_folder
 
 [credentials]
 backend = "config"

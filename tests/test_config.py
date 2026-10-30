@@ -23,7 +23,7 @@ def minimal() -> dict:
 def test_example_config_loads():
     cfg = load_config(EXAMPLE)
     assert cfg.source.manifest_url == "https://directory.cms.gov/downloads/manifest.json"
-    assert cfg.storage.root == "/data/npd"
+    assert cfg.storage.root == "/home/cbadmin/national_provider_dir/npd_data"
     assert cfg.npd_db.raw_schema == "npd_raw"
     assert cfg.npd_db.schema == "npd"
     assert cfg.catalog.file_set == "NPD_FHIR"
