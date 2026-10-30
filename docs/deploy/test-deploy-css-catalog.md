@@ -9,7 +9,7 @@ section *Upgrading production* covers the real rollout.
 |---|---|---|
 | Install | `/home/cbadmin/national_provider_dir/npd-loader` | `/home/cbadmin/national_provider_dir/npd-loader-test` |
 | Config | `/etc/npd-loader/config.toml` | `/etc/npd-loader/config-test.toml` |
-| Data folder | `/data/npd` | `/data/npd_test` |
+| Data folder | `/data/npd` | `/home/cbadmin/national_provider_dir/npd_data/npd_test` |
 | NPD database (192.10.0.6) | `npd` | `npd_test` |
 | Catalog database (192.10.0.6) | `css_catalog_local` | `css_catalog_test` |
 
@@ -33,7 +33,7 @@ On the servers:
 4. 192.10.0.7: cbadmin can read css-catalog-client. See `github-token-css-catalog.md`; its step 3
    must pass.
 5. 192.10.0.6: about **90 GB** free for `npd_test`. One release is about 75 GB, plus working space.
-6. 192.10.0.7: about **45 GB** free on the filesystem holding `/data/npd_test`. That's 2.4 GB of `.zst` plus
+6. 192.10.0.7: about **45 GB** free on the filesystem holding `/home/cbadmin/national_provider_dir/npd_data/npd_test`. That's 2.4 GB of `.zst` plus
    35 GB of `.ndjson` per release.
 7. You can connect to 192.10.0.6 with `psql` as a role that can create databases.
 
@@ -44,8 +44,8 @@ the Postgres role that creates databases; `<npd_user>` and `<catalog_user>` are 
 ## 1. Install the branch beside production (192.10.0.7)
 
 ```bash
-sudo mkdir -p /data/npd_test
-sudo chown cbadmin: /data/npd_test
+sudo mkdir -p /home/cbadmin/national_provider_dir/npd_data/npd_test
+sudo chown cbadmin: /home/cbadmin/national_provider_dir/npd_data/npd_test
 
 # as cbadmin
 mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test
@@ -97,7 +97,7 @@ sudo chmod 600 /etc/npd-loader/config-test.toml
 sudoedit /etc/npd-loader/config-test.toml
 ```
 
-- `[storage] root = "/data/npd_test"`
+- `[storage] root = "/home/cbadmin/national_provider_dir/npd_data/npd_test"`
 - `[npd_db] dbname = "npd_test"`
 - `[catalog] dbname = "css_catalog_test"`
 
