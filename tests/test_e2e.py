@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 import psycopg
 
-from npd_loader.catalog import CssCatalogPg
+from npd_loader.catalog import open_catalog
 from npd_loader.cli import main
 from npd_loader.config import parse_config
 from npd_loader.db import list_release_partitions
@@ -30,7 +30,7 @@ def test_six_releases_end_to_end(tmp_path, cms, make_db, catalog_db):
                        keep_releases=5)
     config_path = tmp_path / "config.toml"
     config_path.write_text(to_toml(data))
-    catalog = CssCatalogPg(catalog_db, parse_config(data).catalog)
+    catalog = open_catalog(parse_config(data).catalog, catalog_db)
     storage = LocalStorage(tmp_path / "data")
 
     def cli(*args):

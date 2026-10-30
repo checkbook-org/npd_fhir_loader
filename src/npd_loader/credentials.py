@@ -29,3 +29,10 @@ def conninfo(config: Config, target: str) -> str:
     creds = get_db_credentials(config, target)
     return make_conninfo(host=section.host, port=section.port, dbname=section.dbname,
                          user=creds.user, password=creds.password)
+
+
+def catalog_connection(config: Config) -> str:
+    """The connection string for the catalog backend: Postgres conninfo, or the SQL Server ODBC string."""
+    if config.catalog.backend == "mssql":
+        return config.catalog.odbc
+    return conninfo(config, "catalog")

@@ -111,3 +111,17 @@ def test_format_status():
     assert lines[0].split() == ["release", "download", "extract", "import", "published"]
     assert lines[1].split() == ["2026-09-29", str(d2.id), "-", "-", "no"]
     assert lines[2].split() == ["2026-09-22", str(d1.id), "-", str(i1.id), "yes"]
+
+
+def test_build_context_mssql_catalog(tmp_path):
+    import css_catalog
+    from npd_loader.catalog import NpdCatalog
+    data = config_data(tmp_path, "https://example.test/downloads/manifest.json")
+    data["catalog"] = {"backend": "mssql", "odbc": "Driver={ODBC Driver 18 for SQL Server};Server=nowhere",
+                       "project": "NPD", "run_type": "National Provider Directory", "file_set": "NPD_FHIR"}
+    ctx = cli.build_context(parse_config(data))
+    try:
+        assert isinstance(ctx.catalog, NpdCatalog)
+        assert isinstance(ctx.catalog._inner, css_catalog.MssqlCatalog)
+    finally:
+        ctx.http.close()

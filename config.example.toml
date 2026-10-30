@@ -30,6 +30,10 @@ password = "..."
 project = "NPD"
 run_type = "National Provider Directory"
 file_set = "NPD_FHIR"
+# SQL Server alternative: replace backend/host/port/dbname/user/password above with these two lines.
+# The login comes from the ODBC string; run_table/file_table default to dbo.MASTER_WAREHOUSE_RUN / dbo.DATA_FILE.
+# backend = "mssql"
+# odbc = "Driver={ODBC Driver 18 for SQL Server};Server=cssnpi;Database=HIE_WAREHOUSE_META;Trusted_Connection=yes;TrustServerCertificate=yes"
 
 [download]
 max_attempts = 8
