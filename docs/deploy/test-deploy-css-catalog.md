@@ -9,7 +9,7 @@ section *Upgrading production* covers the real rollout.
 |---|---|---|
 | Install | `/home/cbadmin/national_provider_dir/npd-loader` | `/home/cbadmin/national_provider_dir/npd-loader-test` |
 | Config | `/etc/npd-loader/config.toml` | `/etc/npd-loader/config-test.toml` |
-| Data folder | `/data/npd` | `/data/npd_test` |
+| Data folder | `/home/cbadmin/national_provider_dir/npd_data` | `/home/cbadmin/national_provider_dir/npd_data_test` |
 | NPD database (192.10.0.6) | `npd` | `npd_test` |
 | Catalog database (192.10.0.6) | `css_catalog_local` | `css_catalog_test` |
 
@@ -33,7 +33,7 @@ On the servers:
 4. 192.10.0.7: cbadmin can read css-catalog-client. See `github-token-css-catalog.md`; its step 3
    must pass.
 5. 192.10.0.6: about **90 GB** free for `npd_test`. One release is about 75 GB, plus working space.
-6. 192.10.0.7: about **45 GB** free on the filesystem holding `/data/npd_test`. That's 2.4 GB of `.zst` plus
+6. 192.10.0.7: about **45 GB** free on the filesystem holding `/home/cbadmin/national_provider_dir/npd_data_test`. That's 2.4 GB of `.zst` plus
    35 GB of `.ndjson` per release.
 7. You can connect to 192.10.0.6 with `psql` as a role that can create databases.
 
@@ -44,11 +44,8 @@ the Postgres role that creates databases; `<npd_user>` and `<catalog_user>` are 
 ## 1. Install the branch beside production (192.10.0.7)
 
 ```bash
-sudo mkdir -p /data/npd_test
-sudo chown cbadmin: /data/npd_test
-
 # as cbadmin
-mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test
+mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test /home/cbadmin/national_provider_dir/npd_data_test
 git clone -b css-catalog-client-migration https://github.com/checkbook-org/npd_fhir_loader.git /home/cbadmin/national_provider_dir/npd-loader-test/src
 python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader-test/.venv
 /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/pip install /home/cbadmin/national_provider_dir/npd-loader-test/src
@@ -60,8 +57,9 @@ css-catalog-client, the token isn't set up for this account. Go back to `github-
 
 The loader runs as cbadmin, as production does today, so this runbook runs every loader command as cbadmin and
 gives cbadmin ownership of the test config and data folder. When production moves to a dedicated `npd` service
-account, change `cbadmin` to `npd` in the `chown`, `sudo -u` and `--uid` lines below. Also give `npd` execute-only
-access to the two folders above the install, so it can reach the venv without being able to list them:
+account, change `cbadmin` to `npd` in the `chown` and `sudo -u` lines below, and give `npd` the data folder with
+`sudo chown -R npd: /home/cbadmin/national_provider_dir/npd_data_test`. Also give `npd` execute-only access to the
+two folders above the install, so it can reach the venv and the data folder without being able to list them:
 `sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir`.
 
 ## 2. Create the test databases (192.10.0.6)
@@ -97,7 +95,7 @@ sudo chmod 600 /etc/npd-loader/config-test.toml
 sudoedit /etc/npd-loader/config-test.toml
 ```
 
-- `[storage] root = "/data/npd_test"`
+- `[storage] root = "/home/cbadmin/national_provider_dir/npd_data_test"`
 - `[npd_db] dbname = "npd_test"`
 - `[catalog] dbname = "css_catalog_test"`
 
@@ -158,6 +156,7 @@ Expect several hours in total; on a workstation it took about 4 h. The run is do
 ## 6. Verify
 
 ```bash
+T="sudo -u cbadmin /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml"
 $T status        # one release, its download/extract/import run ids, published = yes
 ```
 
@@ -191,15 +190,20 @@ SQL
 Expect one release, with about 7.5M practitioners, 11.2M practitioner roles, 2.1M organizations and 2.6M
 locations for a late-2026 release.
 
-**Strongest check:** if production has already loaded the **same release**, the two IMPORT runs must report
-identical row counts for every table. Run this on both `css_catalog_test` and `css_catalog_local`, and compare
-the output:
+**Strongest check:** if production has already loaded the **same release**, every published table must have
+the same number of rows in `npd_test` and `npd`. `compare` counts them in both databases and prints one line
+per table:
 
-```sql
-SELECT xml_output FROM master_warehouse_run
- WHERE run_class = 'IMPORT' AND completion_status = 'Success'
- ORDER BY id DESC LIMIT 1;
+```bash
+$T compare /etc/npd-loader/config.toml                       # the newest release published in both
+$T compare /etc/npd-loader/config.toml --release YYYY-MM-DD  # or a given release
 ```
+
+It exits 0 and ends with `N of N tables match` when every count is equal. A table marked `NO` has a different
+count, or exists for that release in only one database (`-`), and the exit code is 1. `compare` only reads, but
+it counts every row of the release (about 75 GB), so it takes several minutes; run it when neither loader is
+running. It reads each database with the `[npd_db]` user of its own config, so the cbadmin in `$T` must be able
+to read both config files.
 
 Finally, run again. Both stages must be skipped:
 
@@ -215,7 +219,8 @@ Once you no longer need it:
 
 ```bash
 psql -h 192.10.0.6 -U <pg_admin> -d postgres -c 'DROP DATABASE npd_test' -c 'DROP DATABASE css_catalog_test'
-sudo rm -rf /data/npd_test /home/cbadmin/national_provider_dir/npd-loader-test /etc/npd-loader/config-test.toml
+rm -rf /home/cbadmin/national_provider_dir/npd_data_test /home/cbadmin/national_provider_dir/npd-loader-test        # as cbadmin
+sudo rm /etc/npd-loader/config-test.toml
 ```
 
 ## Upgrading production (after the test passes)

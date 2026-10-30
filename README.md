@@ -8,9 +8,9 @@ Design: `docs/superpowers/specs/2026-10-03-npd-fhir-loader-design.md`.
 ## Install (192.10.0.7)
 
 ```bash
-sudo mkdir -p /etc/npd-loader /data/npd
-# as cbadmin, which owns the install and holds the GitHub token (see below)
-mkdir -p /home/cbadmin/national_provider_dir/npd-loader
+sudo mkdir -p /etc/npd-loader
+# as cbadmin, which owns the install and the data folder and holds the GitHub token (see below)
+mkdir -p /home/cbadmin/national_provider_dir/npd-loader /home/cbadmin/national_provider_dir/npd_data
 git clone <repo> /home/cbadmin/national_provider_dir/npd-loader/src
 python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader/.venv
 /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip install /home/cbadmin/national_provider_dir/npd-loader/src
@@ -19,13 +19,14 @@ sudo chmod 600 /etc/npd-loader/config.toml   # then fill in users and passwords
 /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader init-db
 ```
 
-The loader runs as the `npd` service account (see *Schedule*), which needs to reach the venv inside cbadmin's home
-folder. Home folders are often closed to other users (mode 700 or 750), so give `npd` execute-only access to the
-two folders above the install, with no right to list them. Check with
-`sudo -u npd /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --help`:
+The loader runs as the `npd` service account (see *Schedule*), which needs to reach the venv and the data folder
+inside cbadmin's home folder, and to write to the data folder. Home folders are often closed to other users (mode
+700 or 750), so give `npd` execute-only access to the two folders above them, with no right to list them, and give
+it the data folder. Check with `sudo -u npd /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --help`:
 
 ```bash
 sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir
+sudo chown -R npd: /home/cbadmin/national_provider_dir/npd_data
 ```
 
 npd-loader depends on the shared `css-catalog` library, which pip installs from the private repo
@@ -63,6 +64,7 @@ string needs `TrustServerCertificate=yes` unless the server has a trusted certif
 | `npd-loader import [--release YYYY-MM-DD] [--force]` | IMPORT run: load, transform, publish atomically, apply retention |
 | `npd-loader status` | recent releases, their successful runs, and whether each is published |
 | `npd-loader profile FILE [--unmapped]` | JSON paths in an `.ndjson[.zst]` file; `--unmapped` exits 1 if any path is unmapped |
+| `npd-loader compare OTHER_CONFIG [--release YYYY-MM-DD]` | manual check: exact row counts of every published table of one release (default: the newest published in both) in this config's NPD database and in OTHER_CONFIG's; exits 1 if any differ |
 
 Exit code 0 means success, nothing to do, or another run holds the lock; anything else is a failure. Logs go to stderr.
 
