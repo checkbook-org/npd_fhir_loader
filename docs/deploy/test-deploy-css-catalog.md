@@ -49,10 +49,10 @@ mkdir -p /home/cbadmin/national_provider_dir/npd-loader-test /home/cbadmin/natio
 git clone -b css-catalog-client-migration https://github.com/checkbook-org/npd_fhir_loader.git /home/cbadmin/national_provider_dir/npd-loader-test/src
 python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader-test/.venv
 /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/pip install /home/cbadmin/national_provider_dir/npd-loader-test/src
-/home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/pip show css-catalog | head -2
+/home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/pip show css-catalog | grep '^Version'
 ```
 
-Expect `Name: css-catalog` and `Version: 0.1.0`. If pip asks for a GitHub username or fails while cloning
+Expect `Version: 0.1.0`. If pip asks for a GitHub username or fails while cloning
 css-catalog-client, the token isn't set up for this account. Go back to `github-token-css-catalog.md`.
 
 The loader runs as cbadmin, as production does today, so this runbook runs every loader command as cbadmin and
@@ -234,7 +234,7 @@ sudo rm /etc/npd-loader/config-test.toml
    ```bash
    git -C /home/cbadmin/national_provider_dir/npd-loader/src pull
    /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip install --force-reinstall /home/cbadmin/national_provider_dir/npd-loader/src
-   /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip show css-catalog | head -2      # Version: 0.1.0
+   /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip show css-catalog | grep '^Version'      # Version: 0.1.0
    ```
    `--force-reinstall` is needed because npd-loader's own version number did not change.
 5. `sudo -u cbadmin /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml init-db`, then `... status`.
