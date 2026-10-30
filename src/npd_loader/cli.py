@@ -9,9 +9,9 @@ from datetime import date
 
 import httpx
 
-from npd_loader.catalog import Catalog, CssCatalogPg
+from npd_loader.catalog import Catalog, open_catalog
 from npd_loader.config import CatalogConfig, Config, ConfigError, load_config
-from npd_loader.credentials import conninfo
+from npd_loader.credentials import catalog_connection, conninfo
 from npd_loader.db import advisory_lock, published_releases
 from npd_loader.download import run_download
 from npd_loader.extract import run_extract
@@ -49,7 +49,7 @@ def build_context(config: Config) -> Context:
     npd = conninfo(config, "npd_db")
     return Context(
         config=config,
-        catalog=CssCatalogPg(conninfo(config, "catalog"), config.catalog),
+        catalog=open_catalog(config.catalog, catalog_connection(config)),
         storage=LocalStorage(config.storage.root),
         http=httpx.Client(timeout=config.download.timeout_seconds, headers={"User-Agent": "npd-loader/0.1"}),
         lock=lambda stage: advisory_lock(npd, stage),

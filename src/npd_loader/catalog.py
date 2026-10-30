@@ -1,25 +1,25 @@
-"""Run and file tracking. `Catalog` is the interface; CssCatalogPg (below) writes css_catalog_local."""
+"""Run and file tracking. `Catalog` is NPD's interface; NpdCatalog adapts the shared css_catalog library to it."""
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dc_fields
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Iterable, Protocol
 
-import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row
+import css_catalog
+from css_catalog import DataFile
 
 from npd_loader.config import CatalogConfig
 from npd_loader.runxml import parse_release
 
-SUCCESS = "Success"
-FAILED = "Failed"
-MAX_RESULT = 2000  # master_warehouse_run.result is varchar(2000)
-MAX_EXCEPTIONS = 8000  # data_file.exceptions is varchar(8000)
+__all__ = ["SUCCESS", "FAILED", "Run", "DataFile", "Catalog", "NPD_FILE_FIELDS", "NpdCatalog", "open_catalog",
+           "newest_run", "releases_of"]
 
+SUCCESS = css_catalog.SUCCESS
+FAILED = css_catalog.FAILED
 
-def truncate(text: str | None, limit: int) -> str | None:
-    return None if text is None else text[:limit]
+# file_set and source_version_name come from [catalog] config, never from callers.
+NPD_FILE_FIELDS: tuple[str, ...] = tuple(
+    f for f in css_catalog.DATA_FILE_FIELDS if f not in ("file_set", "source_version_name"))
 
 
 @dataclass(frozen=True)
@@ -31,37 +31,6 @@ class Run:
     started_at: datetime
     release_date: date | None
     status: str | None = None
-
-
-@dataclass(frozen=True)
-class DataFile:
-    id: int
-    run_id: int
-    file_type: str | None
-    source_uri: str | None
-    source_version_num: str | None
-    file_name: str | None
-    file_rel_path: str | None
-    run_type_root_dir: str | None
-    parent_file: int | None
-    file_size: int | None
-    file_hash: str | None
-    date_modified: datetime | None
-    date_created: datetime | None
-    date_loaded: datetime | None
-    exceptions: str | None
-
-
-DATA_FILE_FIELDS: tuple[str, ...] = tuple(f.name for f in dc_fields(DataFile) if f.name not in ("id", "run_id"))
-
-
-def clean_fields(fields: dict[str, object]) -> dict[str, object]:
-    unknown = set(fields) - set(DATA_FILE_FIELDS)
-    if unknown:
-        raise TypeError(f"unknown data_file fields: {sorted(unknown)}")
-    if isinstance(fields.get("exceptions"), str):
-        fields = {**fields, "exceptions": truncate(fields["exceptions"], MAX_EXCEPTIONS)}
-    return fields
 
 
 def newest_run(runs: Iterable[Run], release: date | None) -> Run | None:
@@ -83,77 +52,65 @@ class Catalog(Protocol):
     def successful_releases(self, run_class: str) -> list[date]: ...
 
 
-def _qualified(name: str) -> sql.Identifier:
-    return sql.Identifier(*name.split(".", 1))
+def _now() -> datetime:
+    return datetime.now().replace(microsecond=0)
 
 
-class CssCatalogPg:
-    """Catalog in css_catalog_local. Each call uses its own short autocommit connection, so catalog writes
-    commit independently of data loads and survive their failures."""
+def _check_fields(fields: dict[str, object]) -> None:
+    unknown = set(fields) - set(NPD_FILE_FIELDS)
+    if unknown:
+        raise TypeError(f"unknown data_file fields: {sorted(unknown)}")
 
-    def __init__(self, conninfo: str, cfg: CatalogConfig):
-        self._conninfo = conninfo
+
+class NpdCatalog:
+    """NPD's Catalog interface over a css_catalog catalog, scoped to the configured project and run type."""
+
+    def __init__(self, inner: css_catalog.Catalog, cfg: CatalogConfig):
+        self._inner = inner
         self._cfg = cfg
-        self._runs = _qualified(cfg.run_table)
-        self._files = _qualified(cfg.file_table)
-
-    def _connect(self) -> psycopg.Connection:
-        return psycopg.connect(self._conninfo, autocommit=True)
 
     def start_run(self, run_class: str, description: str, config_xml: str) -> Run:
-        started = datetime.now().replace(microsecond=0)
-        query = sql.SQL("INSERT INTO {} (project, run_type, run_class, run_description, xml_config, date_started) "
-                        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id").format(self._runs)
-        with self._connect() as conn:
-            run_id = conn.execute(query, (self._cfg.project, self._cfg.run_type, run_class, description,
-                                          config_xml, started)).fetchone()[0]
-        return Run(run_id, run_class, description, config_xml, started, parse_release(config_xml))
+        started = _now()
+        run = self._inner.start_run(project=self._cfg.project, run_type=self._cfg.run_type, run_class=run_class,
+                                    description=description, config=config_xml, started_at=started)
+        return Run(run.id, run_class, description, config_xml, started, parse_release(config_xml))
 
     def finish_run(self, run: Run, status: str, result: str | None = None, output_xml: str | None = None) -> None:
-        label = {SUCCESS: self._cfg.status_success, FAILED: self._cfg.status_failed}[status]
-        query = sql.SQL("UPDATE {} SET completion_status = %s, date_completed = %s, result = %s, xml_output = %s "
-                        "WHERE id = %s").format(self._runs)
-        with self._connect() as conn:
-            conn.execute(query, (label, datetime.now().replace(microsecond=0), truncate(result, MAX_RESULT), output_xml, run.id))
+        self._inner.finish_run(run.id, status, result=result, output_xml=output_xml, completed_at=_now())
 
     def add_data_file(self, run: Run, **fields: object) -> int:
-        fields = clean_fields(fields)
-        cols = ["run_id", "file_set", "source_version_name", *fields]
-        vals = [run.id, self._cfg.file_set, self._cfg.source_version_name, *fields.values()]
-        query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) RETURNING id").format(
-            self._files, sql.SQL(", ").join(map(sql.Identifier, cols)),
-            sql.SQL(", ").join([sql.Placeholder()] * len(cols)))
-        with self._connect() as conn:
-            return conn.execute(query, vals).fetchone()[0]
+        _check_fields(fields)
+        return self._inner.add_file(run.id, file_set=self._cfg.file_set,
+                                    source_version_name=self._cfg.source_version_name, **fields)
 
     def update_data_file(self, file_id: int, **fields: object) -> None:
-        fields = clean_fields(fields)
+        _check_fields(fields)
         if not fields:
             return
-        sets = sql.SQL(", ").join(sql.SQL("{} = %s").format(sql.Identifier(k)) for k in fields)
-        query = sql.SQL("UPDATE {} SET {} WHERE id = %s").format(self._files, sets)
-        with self._connect() as conn:
-            conn.execute(query, [*fields.values(), file_id])
+        self._inner.update_file(file_id, **fields)
 
     def get_data_files(self, release: date, file_type: str, run_id: int | None = None) -> list[DataFile]:
-        cols = sql.SQL(", ").join(map(sql.Identifier, ["id", "run_id", *DATA_FILE_FIELDS]))
-        query = sql.SQL("SELECT {} FROM {} WHERE file_set = %s AND source_version_num = %s AND file_type = %s "
-                        "AND (%s::integer IS NULL OR run_id = %s) ORDER BY id").format(cols, self._files)
-        with self._connect() as conn, conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, (self._cfg.file_set, release.isoformat(), file_type, run_id, run_id))
-            return [DataFile(**row) for row in cur.fetchall()]
+        return self._inner.find_files(file_set=self._cfg.file_set, source_version_num=release.isoformat(),
+                                      file_type=file_type, run_id=run_id)
 
     def _successful_runs(self, run_class: str) -> list[Run]:
-        query = sql.SQL("SELECT id, run_class, run_description, xml_config::text, date_started, "
-                        "completion_status FROM {} WHERE project = %s AND run_type = %s AND run_class = %s "
-                        "AND completion_status = %s").format(self._runs)
-        with self._connect() as conn:
-            rows = conn.execute(query, (self._cfg.project, self._cfg.run_type, run_class,
-                                        self._cfg.status_success)).fetchall()
-        return [Run(r[0], r[1], r[2] or "", r[3] or "", r[4], parse_release(r[3]), SUCCESS) for r in rows]
+        runs = self._inner.find_runs(project=self._cfg.project, run_type=self._cfg.run_type, run_class=run_class,
+                                     status=SUCCESS)
+        return [Run(r.id, run_class, r.description or "", r.config_xml or "", r.started_at,
+                    parse_release(r.config_xml), SUCCESS) for r in runs]
 
     def last_successful_run(self, run_class: str, release: date | None = None) -> Run | None:
         return newest_run(self._successful_runs(run_class), release)
 
     def successful_releases(self, run_class: str) -> list[date]:
         return releases_of(self._successful_runs(run_class))
+
+
+_BACKENDS = {"css_catalog_pg": "postgres", "mssql": "mssql"}
+
+
+def open_catalog(cfg: CatalogConfig, connection: str) -> NpdCatalog:
+    inner = css_catalog.connect(_BACKENDS[cfg.backend], connection, run_table=cfg.run_table,
+                                file_table=cfg.file_table, status_success=cfg.status_success,
+                                status_failed=cfg.status_failed)
+    return NpdCatalog(inner, cfg)

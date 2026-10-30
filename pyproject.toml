@@ -11,6 +11,7 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "zstandard>=0.22",
     "httpx>=0.27",
+    "css-catalog[mssql] @ git+https://github.com/Consumers-Checkbook/css-catalog-client@v0.1.0#subdirectory=python",
 ]
 
 [project.optional-dependencies]

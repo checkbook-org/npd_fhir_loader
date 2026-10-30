@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from npd_loader.config import ConfigError, load_config, parse_config
-from npd_loader.credentials import DbCredentials, conninfo, get_db_credentials
+from npd_loader.credentials import DbCredentials, catalog_connection, conninfo, get_db_credentials
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "config.example.toml"
 
@@ -106,3 +106,60 @@ def test_credentials_missing_password():
     cfg = parse_config(data)
     with pytest.raises(ConfigError, match="password"):
         get_db_credentials(cfg, "npd_db")
+
+
+ODBC = "Driver={ODBC Driver 18 for SQL Server};Server=cssnpi;Database=HIE_WAREHOUSE_META;Trusted_Connection=yes"
+
+
+def mssql_data(**extra) -> dict:
+    data = minimal()
+    data["catalog"] = {"backend": "mssql", "odbc": ODBC, "project": "NPD",
+                       "run_type": "National Provider Directory", "file_set": "NPD_FHIR", **extra}
+    return data
+
+
+def test_mssql_catalog_config():
+    cfg = parse_config(mssql_data())
+    assert cfg.catalog.backend == "mssql"
+    assert cfg.catalog.run_table == "dbo.MASTER_WAREHOUSE_RUN"
+    assert cfg.catalog.file_table == "dbo.DATA_FILE"
+    assert catalog_connection(cfg) == ODBC
+
+
+def test_pg_catalog_connection_is_conninfo():
+    cfg = parse_config(minimal())
+    assert catalog_connection(cfg) == conninfo(cfg, "catalog")
+
+
+def test_mssql_requires_odbc():
+    data = mssql_data()
+    del data["catalog"]["odbc"]
+    with pytest.raises(ConfigError, match=r"\[catalog\] odbc"):
+        parse_config(data)
+
+
+@pytest.mark.parametrize("odbc", ["", "   "])
+def test_mssql_rejects_empty_odbc(odbc):
+    data = mssql_data()
+    data["catalog"]["odbc"] = odbc
+    with pytest.raises(ConfigError, match=r"\[catalog\] odbc must not be empty"):
+        parse_config(data)
+
+
+@pytest.mark.parametrize("key,value", [("host", "h"), ("port", 1433), ("dbname", "d"), ("user", "u"),
+                                       ("password", "p")])
+def test_mssql_rejects_pg_fields(key, value):
+    with pytest.raises(ConfigError, match=rf"\[catalog\] {key}"):
+        parse_config(mssql_data(**{key: value}))
+
+
+def test_pg_rejects_odbc():
+    data = minimal()
+    data["catalog"]["odbc"] = ODBC
+    with pytest.raises(ConfigError, match=r"\[catalog\] odbc"):
+        parse_config(data)
+
+
+def test_mssql_explicit_tables_win():
+    cfg = parse_config(mssql_data(run_table="x.RUN", file_table="x.FILE"))
+    assert (cfg.catalog.run_table, cfg.catalog.file_table) == ("x.RUN", "x.FILE")

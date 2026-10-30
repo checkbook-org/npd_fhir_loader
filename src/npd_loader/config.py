@@ -42,14 +42,15 @@ class NpdDbConfig:
 @dataclass(frozen=True)
 class CatalogConfig:
     backend: str
-    host: str
-    port: int
-    dbname: str
-    user: str | None
-    password: str | None
     project: str
     run_type: str
     file_set: str
+    host: str | None = None        # css_catalog_pg only
+    port: int | None = None        # css_catalog_pg only
+    dbname: str | None = None      # css_catalog_pg only
+    user: str | None = None        # css_catalog_pg only
+    password: str | None = None    # css_catalog_pg only
+    odbc: str | None = None        # mssql only: the full ODBC connection string
     run_table: str = "public.master_warehouse_run"
     file_table: str = "public.data_file"
     run_class_download: str = "DOWNLOAD"
@@ -90,7 +91,12 @@ class Config:
 
 STORAGE_BACKENDS = {"local"}
 CREDENTIAL_BACKENDS = {"config"}
-CATALOG_BACKENDS = {"css_catalog_pg"}
+CATALOG_BACKENDS = {"css_catalog_pg", "mssql"}
+CATALOG_DEFAULT_TABLES = {
+    "css_catalog_pg": ("public.master_warehouse_run", "public.data_file"),
+    "mssql": ("dbo.MASTER_WAREHOUSE_RUN", "dbo.DATA_FILE"),
+}
+CATALOG_PG_ONLY = ("host", "port", "dbname", "user", "password")
 
 
 def load_config(path: str | Path) -> Config:
@@ -151,8 +157,27 @@ def parse_config(data: dict[str, Any]) -> Config:
     dl = _section(data, "download", required=False)
     ret = _section(data, "retention", required=False)
 
-    catalog_known = {"backend", "host", "port", "dbname", "user", "password", "project", "run_type", "file_set"}
+    catalog_known = {"backend", "host", "port", "dbname", "user", "password", "odbc", "project", "run_type",
+                     "file_set"}
     catalog_extra = _optional({k: v for k, v in cat.items() if k not in catalog_known}, "catalog", CatalogConfig)
+
+    catalog_backend = _backend(cat, "catalog", CATALOG_BACKENDS)
+    if catalog_backend == "mssql":
+        for key in CATALOG_PG_ONLY:
+            if key in cat:
+                raise ConfigError(f"[catalog] {key} is not allowed with backend 'mssql' (use odbc)")
+        odbc = _req(cat, "catalog", "odbc")
+        if not str(odbc).strip():
+            raise ConfigError("[catalog] odbc must not be empty")
+        connection = {"odbc": odbc}
+    else:
+        if "odbc" in cat:
+            raise ConfigError(f"[catalog] odbc is only allowed with backend 'mssql', not {catalog_backend!r}")
+        connection = {"host": _req(cat, "catalog", "host"), "port": _req(cat, "catalog", "port", int),
+                      "dbname": _req(cat, "catalog", "dbname"), "user": cat.get("user"),
+                      "password": cat.get("password")}
+    run_table, file_table = CATALOG_DEFAULT_TABLES[catalog_backend]
+    catalog_extra = {"run_table": run_table, "file_table": file_table, **catalog_extra}
 
     config = Config(
         source=SourceConfig(manifest_url=_req(src, "source", "manifest_url")),
@@ -169,12 +194,8 @@ def parse_config(data: dict[str, Any]) -> Config:
             **_optional({k: v for k, v in npd.items() if k == "lock_timeout_seconds"}, "npd_db", NpdDbConfig),
         ),
         catalog=CatalogConfig(
-            backend=_backend(cat, "catalog", CATALOG_BACKENDS),
-            host=_req(cat, "catalog", "host"),
-            port=_req(cat, "catalog", "port", int),
-            dbname=_req(cat, "catalog", "dbname"),
-            user=cat.get("user"),
-            password=cat.get("password"),
+            backend=catalog_backend,
+            **connection,
             project=_req(cat, "catalog", "project"),
             run_type=_req(cat, "catalog", "run_type"),
             file_set=_req(cat, "catalog", "file_set"),

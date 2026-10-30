@@ -8,14 +8,36 @@ Design: `docs/superpowers/specs/2026-10-03-npd-fhir-loader-design.md`.
 ## Install (192.10.0.7)
 
 ```bash
-sudo mkdir -p /opt/npd-loader /etc/npd-loader /data/npd
-git clone <repo> /opt/npd-loader/src
-python3.12 -m venv /opt/npd-loader/.venv
-/opt/npd-loader/.venv/bin/pip install /opt/npd-loader/src
-sudo cp /opt/npd-loader/src/config.example.toml /etc/npd-loader/config.toml
+sudo mkdir -p /etc/npd-loader /data/npd
+# as cbadmin, which owns the install and holds the GitHub token (see below)
+mkdir -p /home/cbadmin/national_provider_dir/npd-loader
+git clone <repo> /home/cbadmin/national_provider_dir/npd-loader/src
+python3.12 -m venv /home/cbadmin/national_provider_dir/npd-loader/.venv
+/home/cbadmin/national_provider_dir/npd-loader/.venv/bin/pip install /home/cbadmin/national_provider_dir/npd-loader/src
+sudo cp /home/cbadmin/national_provider_dir/npd-loader/src/config.example.toml /etc/npd-loader/config.toml
 sudo chmod 600 /etc/npd-loader/config.toml   # then fill in users and passwords
-/opt/npd-loader/.venv/bin/npd-loader init-db
+/home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader init-db
 ```
+
+The loader runs as the `npd` service account (see *Schedule*), which needs to reach the venv inside cbadmin's home
+folder. Home folders are often closed to other users (mode 700 or 750), so give `npd` execute-only access to the
+two folders above the install, with no right to list them. Check with
+`sudo -u npd /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --help`:
+
+```bash
+sudo setfacl -m u:npd:x /home/cbadmin /home/cbadmin/national_provider_dir
+```
+
+npd-loader depends on the shared `css-catalog` library, which pip installs from the private repo
+https://github.com/Consumers-Checkbook/css-catalog-client, pinned to a tag in `pyproject.toml`. The account that
+runs `pip install` therefore needs read access to that repo: a fine-grained, read-only token that git uses only
+for that URL. Setup, checks and renewal are in `docs/deploy/github-token-css-catalog.md`. To move to a newer
+library release, change the tag in `pyproject.toml`, run the tests, and reinstall with `pip install --force-reinstall`.
+
+On a Windows development machine, Git Credential Manager (part of Git for Windows) normally handles access: run
+`git ls-remote https://github.com/Consumers-Checkbook/css-catalog-client` once and sign in. To work on the library
+and the loader together, install a local checkout over the pinned one:
+`.venv\Scripts\python -m pip install -e ..\css-catalog-client\python[mssql]`.
 
 `init-db` is idempotent. The `npd` database must already exist, and the `npd_db` user needs CREATE on it.
 
@@ -23,6 +45,13 @@ sudo chmod 600 /etc/npd-loader/config.toml   # then fill in users and passwords
 idempotent schema changes in `src/npd_loader/sql/init/900_migrations.sql` (the only place post-deployment changes to
 existing tables go, as `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`), and recreates the `v_*` views automatically.
 The `catalog` user needs INSERT/UPDATE/SELECT on `master_warehouse_run` and `data_file`.
+
+**Catalog backends:** `[catalog] backend` is `css_catalog_pg` (Postgres; `host`, `port`, `dbname`, `user`, `password`)
+or `mssql` (SQL Server; a single `odbc` connection string, with the login inside it, normally
+`Trusted_Connection=yes`, and none of the Postgres fields). Tables default to `public.master_warehouse_run` /
+`public.data_file` for Postgres and `dbo.MASTER_WAREHOUSE_RUN` / `dbo.DATA_FILE` for SQL Server; set `run_table` /
+`file_table` to override. A config mixing the two styles fails at load. ODBC Driver 18 encrypts by default, so the
+string needs `TrustServerCertificate=yes` unless the server has a trusted certificate. See `config.example.toml`.
 
 ## Commands
 
@@ -56,7 +85,7 @@ Description=Load the CMS NPD FHIR release
 [Service]
 Type=oneshot
 User=npd
-ExecStart=/opt/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml run
+ExecStart=/home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml run
 ```
 
 ```ini
@@ -76,7 +105,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now npd-loader.timer
 journalctl -u npd-loader.service
 ```
 
-or cron: `0 6 * * * /opt/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml run >> /var/log/npd-loader.log 2>&1`
+or cron: `0 6 * * * /home/cbadmin/national_provider_dir/npd-loader/.venv/bin/npd-loader --config /etc/npd-loader/config.toml run >> /var/log/npd-loader.log 2>&1`
 
 ## Querying
 
