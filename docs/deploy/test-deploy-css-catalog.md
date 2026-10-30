@@ -122,13 +122,27 @@ $T status
 
 ## 5. Full run
 
-Run it as a transient systemd unit, so it survives logging out and its log goes to the journal:
+Run it inside `screen` as cbadmin, so it keeps running if your SSH session drops. The log is also written to a
+file:
 
 ```bash
-sudo systemd-run --unit=npd-loader-test --uid=cbadmin \
-     /home/cbadmin/national_provider_dir/npd-loader-test/.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml run
-journalctl -u npd-loader-test -f        # Ctrl-C stops following, not the run
+screen -S npd-test                      # opens a new shell inside a screen session named npd-test
 ```
+
+In that shell:
+
+```bash
+cd /home/cbadmin/national_provider_dir/npd-loader-test
+.venv/bin/npd-loader --config /etc/npd-loader/config-test.toml run 2>&1 | tee run.log
+echo "exit ${PIPESTATUS[0]}" | tee -a run.log
+```
+
+- **Detach** (leave it running): press `Ctrl-a`, then `d`. You can now log out.
+- **Reattach later:** `screen -r npd-test`. If it is the only session, plain `screen -r` works too. `screen -ls`
+  lists sessions.
+- **Follow the log without reattaching:**
+  `tail -f /home/cbadmin/national_provider_dir/npd-loader-test/run.log`
+- **When finished:** type `exit` in the screen shell to close the session.
 
 The sequence:
 - download: a few minutes
@@ -138,9 +152,8 @@ The sequence:
 - `published release YYYY-MM-DD (27 tables)`
 - `run: import: success`
 
-Expect several hours in total; on a workstation it took about 4 h. The run is done when the journal shows
-`npd-loader-test.service: Deactivated successfully`. On a failure it shows `Main process exited, code=exited,
-status=1/FAILURE`, plus the error a few lines above.
+Expect several hours in total; on a workstation it took about 4 h. The run is done when `run.log` ends with
+`exit 0`. On a failure it ends with `exit 1`, and the error is a few lines above.
 
 ## 6. Verify
 
